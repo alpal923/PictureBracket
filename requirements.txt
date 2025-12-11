@@ -2,3 +2,8 @@ pandas
 numpy
 streamlit
 plotly
+random
+json
+uuid
+datetime
+pathlib
