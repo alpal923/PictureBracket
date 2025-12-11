@@ -4,6 +4,8 @@ import json
 from uuid import uuid4
 from datetime import datetime
 from pathlib import Path
+import io
+import pandas as pd
 
 # ------------- Config -------------
 
@@ -39,7 +41,9 @@ def ensure_state():
         "champion_index": None,
         "bracket_started": False,
         "winner_saved": False,
-        "history": load_history()
+        "history": load_history(),
+        "vote_log": [],                 # list of vote events for current bracket
+        "current_match_context": None,  # details of current matchup
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -76,6 +80,8 @@ def generate_bracket():
     st.session_state.champion_index = None
     st.session_state.bracket_started = True
     st.session_state.winner_saved = False
+    st.session_state.vote_log = []
+    st.session_state.current_match_context = None
 
 
 def advance_until_match_or_winner():
@@ -139,17 +145,54 @@ def advance_until_match_or_winner():
 
 def record_vote(choice: str):
     """choice is 'left' or 'right' for the current match."""
-    r = st.session_state.current_round
-    m = st.session_state.current_match
-    a_idx, b_idx = st.session_state.bracket_rounds[r][m]
+    ctx = st.session_state.current_match_context
+    if ctx is None:
+        return
+
+    round_num = ctx["round_num"]
+    match_num = ctx["match_num"]
+    a_idx = ctx["a_idx"]
+    b_idx = ctx["b_idx"]
+
+    left = st.session_state.entries[a_idx]
+    right = st.session_state.entries[b_idx]
 
     if choice == "left":
         winner_idx = a_idx
+        winner_side = "left"
+        loser_idx = b_idx
     else:
         winner_idx = b_idx
+        winner_side = "right"
+        loser_idx = a_idx
 
+    # Append vote event to log
+    st.session_state.vote_log.append(
+        {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "round": round_num,
+            "match": match_num,
+            "left_index": a_idx,
+            "left_title": left["title"],
+            "left_image_url": left["image_url"],
+            "right_index": b_idx,
+            "right_title": right["title"],
+            "right_image_url": right["image_url"],
+            "winner_side": winner_side,
+            "winner_index": winner_idx,
+            "winner_title": st.session_state.entries[winner_idx]["title"],
+            "loser_index": loser_idx,
+            "loser_title": st.session_state.entries[loser_idx]["title"],
+        }
+    )
+
+    # Advance bracket state
+    r = st.session_state.current_round
+    m = st.session_state.current_match
     st.session_state.next_round_winners.append(winner_idx)
     st.session_state.current_match += 1
+    st.session_state.current_match_context = None
+
     st.experimental_rerun()
 
 
@@ -161,6 +204,8 @@ def reset_bracket_only():
     st.session_state.champion_index = None
     st.session_state.bracket_started = False
     st.session_state.winner_saved = False
+    st.session_state.vote_log = []
+    st.session_state.current_match_context = None
 
 
 def reset_everything():
@@ -186,13 +231,14 @@ def save_current_bracket_to_history():
         "winner_image_url": winner["image_url"],
         "entries": st.session_state.entries,
         "rounds": st.session_state.bracket_rounds,
+        "vote_log": st.session_state.vote_log,  # FULL step-by-step history
     }
     st.session_state.history.append(record)
     save_history(st.session_state.history)
     st.session_state.winner_saved = True
 
 
-# ------------- UI -------------
+# ------------- UI: Current Bracket -------------
 
 def page_current_bracket():
     st.header("Create & Run Bracket")
@@ -275,10 +321,25 @@ def page_current_bracket():
                 reset_everything()
                 st.experimental_rerun()
 
+        # Show the vote log for this just-completed bracket
+        if st.session_state.vote_log:
+            st.markdown("### This bracket's vote log")
+            df = pd.DataFrame(st.session_state.vote_log)
+            st.dataframe(df, use_container_width=True)
+
     elif status == "match":
         round_num, match_num, a_idx, b_idx, total_matches = data
         left = st.session_state.entries[a_idx]
         right = st.session_state.entries[b_idx]
+
+        # Store context so record_vote can log properly
+        st.session_state.current_match_context = {
+            "round_num": round_num,
+            "match_num": match_num,
+            "a_idx": a_idx,
+            "b_idx": b_idx,
+            "total_matches": total_matches,
+        }
 
         st.subheader(f"Round {round_num} – Match {match_num} / {total_matches}")
 
@@ -300,6 +361,8 @@ def page_current_bracket():
         st.warning("Bracket state looks weird. Try resetting & restarting.")
 
 
+# ------------- UI: History -------------
+
 def page_history():
     st.header("Past Brackets")
 
@@ -315,7 +378,12 @@ def page_history():
         f"{i+1}. {h['winner_title']} (created {h['created_at']})"
         for i, h in enumerate(history_sorted)
     ]
-    idx = st.selectbox("Select a past bracket", options=list(range(len(history_sorted))), format_func=lambda i: labels[i], key="history_select")
+    idx = st.selectbox(
+        "Select a past bracket",
+        options=list(range(len(history_sorted))),
+        format_func=lambda i: labels[i],
+        key="history_select",
+    )
 
     record = history_sorted[idx]
 
@@ -327,6 +395,25 @@ def page_history():
         for i, e in enumerate(record["entries"], start=1):
             st.markdown(f"**#{i}** – {e['title']}")
             st.caption(e["image_url"])
+
+    # Vote log (step-by-step history)
+    vote_log = record.get("vote_log", [])
+    st.markdown("### Vote history for this bracket")
+    if vote_log:
+        df = pd.DataFrame(vote_log)
+        st.dataframe(df, use_container_width=True)
+
+        # CSV download
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+        st.download_button(
+            label="Download vote history as CSV",
+            data=csv_buffer.getvalue(),
+            file_name=f"bracket_{record['id']}_votes.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("No vote history stored for this bracket (probably from an older version of the app).")
 
 
 # ------------- Main -------------
