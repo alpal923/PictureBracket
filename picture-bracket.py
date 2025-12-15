@@ -43,6 +43,7 @@ def ensure_state():
         "history": load_history(),
         "vote_log": [],
         "current_match_context": None,
+        "input_nonce": 0,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -232,105 +233,38 @@ def save_current_bracket_to_history():
 def page_current_bracket():
     st.header("Create & Run Bracket")
 
-    # # Add entries (URL or Upload)
-    # st.subheader("Add entries")
-
-    # if st.session_state.bracket_started:
-    #     st.info("Bracket already started — reset bracket to edit entries.")
-    # else:
-    #     with st.form("add_entry_form"):
-    #         title = st.text_input("Description / Name")
-
-    #         mode = st.radio("Image source", ["URL", "Upload"], horizontal=True)
-
-    #         image_url = ""
-    #         uploaded_file = None
-
-    #         if mode == "URL":
-    #             image_url = st.text_input("Image URL (https://...)")
-    #             # Preview (best-effort)
-    #             if image_url.strip():
-    #                 st.caption("Preview:")
-    #                 image_preview(image_url.strip(), max_width=200)
-    #         else:
-    #             uploaded_file = st.file_uploader(
-    #                 "Upload image (png/jpg/webp)",
-    #                 type=["png", "jpg", "jpeg", "webp"],
-    #             )
-    #             if uploaded_file is not None:
-    #                 st.caption("Preview:")
-    #                 image_preview(uploaded_file, max_width=200)
-
-    #         submitted = st.form_submit_button("Add entry")
-
-    #         if submitted:
-    #             if len(st.session_state.entries) >= MAX_ENTRIES:
-    #                 st.warning(f"Max of {MAX_ENTRIES} entries reached.")
-    #             elif not title.strip():
-    #                 st.warning("Description / Name is required.")
-    #             elif mode == "URL" and not image_url.strip():
-    #                 st.warning("Image URL is required.")
-    #             elif mode == "Upload" and uploaded_file is None:
-    #                 st.warning("Please upload an image.")
-    #             else:
-    #                 if mode == "URL":
-    #                     image_kind = "url"
-    #                     image_ref = image_url.strip()
-    #                 else:
-    #                     # Save uploaded image to disk so it persists and can appear in history
-    #                     suffix = Path(uploaded_file.name).suffix.lower() or ".png"
-    #                     fname = f"{uuid4().hex}{suffix}"
-    #                     out_path = UPLOAD_DIR / fname
-    #                     out_path.write_bytes(uploaded_file.getbuffer())
-    #                     image_kind = "file"
-    #                     image_ref = str(out_path)
-
-    #                 st.session_state.entries.append({
-    #                     "id": len(st.session_state.entries),
-    #                     "title": title.strip(),
-    #                     "image_kind": image_kind,
-    #                     "image_ref": image_ref,
-    #                 })
-    #                 st.success(f"Added: {title.strip()}")
-    #                 st.rerun()
-
     st.subheader("Add entries")
 
     if st.session_state.bracket_started:
         st.info("Bracket already started — reset bracket to edit entries.")
     else:
-        # ---- Inputs (NOT in a form) so they rerun live ----
         mode = st.radio("Image source", ["URL", "Upload"], horizontal=True, key="image_mode")
 
-        title = st.text_input("Description / Name", key="title_input")
+        nonce = st.session_state.input_nonce
+
+        title = st.text_input("Description / Name", key=f"title_input_{nonce}")
 
         image_url = ""
         uploaded_file = None
 
         if mode == "URL":
-            image_url = st.text_input("Image URL (https://...)", key="image_url_input")
-
-            # ✅ live preview as you type
+            image_url = st.text_input("Image URL (https://...)", key=f"image_url_input_{nonce}")
             if image_url.strip():
                 st.caption("Preview:")
                 try:
                     st.image(image_url.strip(), width=200)
                 except Exception:
                     st.warning("Could not preview that URL (might be invalid or blocked).")
-
         else:
             uploaded_file = st.file_uploader(
                 "Upload image (png/jpg/webp)",
                 type=["png", "jpg", "jpeg", "webp"],
-                key="upload_input"
+                key=f"upload_input_{nonce}"
             )
-
-            # ✅ live preview as soon as you pick a file
             if uploaded_file is not None:
                 st.caption("Preview:")
                 st.image(uploaded_file, width=200)
 
-        # ---- Add button ----
         add_disabled = len(st.session_state.entries) >= MAX_ENTRIES
         if st.button("Add entry", disabled=add_disabled):
             if len(st.session_state.entries) >= MAX_ENTRIES:
@@ -360,14 +294,10 @@ def page_current_bracket():
                     "image_ref": image_ref,
                 })
 
-                # clear inputs after add (similar to clear_on_submit)
-                st.session_state.title_input = ""
-                st.session_state.image_url_input = ""
-                st.session_state.upload_input = None
-
+                # ✅ clear inputs by changing widget keys
+                st.session_state.input_nonce += 1
                 st.success(f"Added: {title.strip()}")
                 st.rerun()
-
 
     st.write(f"Current entries: **{len(st.session_state.entries)} / {MAX_ENTRIES}**")
 
@@ -419,7 +349,7 @@ def page_current_bracket():
 
         st.success("Tournament complete!")
         st.subheader("🏆 Winner")
-        st.image(entry_image_display(winner), caption=winner["title"], use_container_width=True)
+        image_preview(entry_image_display(winner), max_width=450)
         st.write(f"**{winner['title']}** is the champion.")
 
         save_current_bracket_to_history()
@@ -443,6 +373,12 @@ def page_current_bracket():
         left = st.session_state.entries[a_idx]
         right = st.session_state.entries[b_idx]
 
+        vote_size = st.slider(
+            "Voting image size",
+            200, 600, 350, 25,
+            key="vote_image_size",
+        )
+
         st.session_state.current_match_context = {
             "round_num": round_num,
             "match_num": match_num,
@@ -455,13 +391,13 @@ def page_current_bracket():
         colL, colR = st.columns([1, 1])
 
         with colL:
-            image_vote(entry_image_display(left), max_width=350)
+            image_vote(entry_image_display(left), max_width=vote_size)
             st.markdown(f"**{left['title']}**")
             if st.button("Winner", key=f"left_{round_num}_{match_num}"):
                 record_vote("left")
 
         with colR:
-            image_vote(entry_image_display(right), max_width=350)
+            image_vote(entry_image_display(right), max_width=vote_size)
             st.markdown(f"**{right['title']}**")
             if st.button("Winner ", key=f"right_{round_num}_{match_num}"):
                 record_vote("right")
