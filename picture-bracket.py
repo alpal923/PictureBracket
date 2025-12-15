@@ -65,8 +65,12 @@ def reset_everything():
     st.session_state.entries = []
     reset_bracket_only()
 
+# ---------------- Image display helpers ----------------
 
 def image_preview(img, max_width=200):
+    st.image(img, width=max_width)
+
+def image_vote(img, max_width=350):
     st.image(img, width=max_width)
 
 # ---------------- Bracket logic ----------------
@@ -373,16 +377,16 @@ def page_current_bracket():
         }
 
         st.subheader(f"Round {round_num} – Match {match_num} / {total_matches}")
-        colL, colR = st.columns(2)
+        colL, colR = st.columns([1, 1])
 
         with colL:
-            st.image(entry_image_display(left), use_container_width=True)
+            image_vote(entry_image_display(left), max_width=350)
             st.markdown(f"**{left['title']}**")
             if st.button("Winner", key=f"left_{round_num}_{match_num}"):
                 record_vote("left")
 
         with colR:
-            st.image(entry_image_display(right), use_container_width=True)
+            image_vote(entry_image_display(right), max_width=350)
             st.markdown(f"**{right['title']}**")
             if st.button("Winner ", key=f"right_{round_num}_{match_num}"):
                 record_vote("right")
