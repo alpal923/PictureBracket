@@ -2,7 +2,7 @@ import streamlit as st
 import random
 import json
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import io
 import pandas as pd
@@ -189,7 +189,7 @@ def record_vote(choice: str):
         winner_side = "right"
 
     st.session_state.vote_log.append({
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "round": round_num,
         "match": match_num,
 
@@ -223,7 +223,7 @@ def save_current_bracket_to_history():
     record = {
         "id": str(uuid4()),
         "bracket_name": st.session_state.bracket_name,
-        "created_at": datetime.now(datetime.timezone.utc).isoformat() + "Z",
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "winner_title": winner["title"],
         "winner_image_kind": winner["image_kind"],
         "winner_image_ref": winner["image_ref"],
