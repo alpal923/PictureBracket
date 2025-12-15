@@ -66,6 +66,9 @@ def reset_everything():
     reset_bracket_only()
 
 
+def image_preview(img, max_width=200):
+    st.image(img, width=max_width)
+
 # ---------------- Bracket logic ----------------
 
 def generate_bracket():
@@ -244,7 +247,7 @@ def page_current_bracket():
                 # Preview (best-effort)
                 if image_url.strip():
                     st.caption("Preview:")
-                    st.image(image_url.strip(), use_container_width=True)
+                    image_preview(image_url.strip(), max_width=200)
             else:
                 uploaded_file = st.file_uploader(
                     "Upload image (png/jpg/webp)",
@@ -252,7 +255,7 @@ def page_current_bracket():
                 )
                 if uploaded_file is not None:
                     st.caption("Preview:")
-                    st.image(uploaded_file, use_container_width=True)
+                    image_preview(uploaded_file, max_width=200)
 
             submitted = st.form_submit_button("Add entry")
 
@@ -295,7 +298,7 @@ def page_current_bracket():
             for i, e in enumerate(st.session_state.entries):
                 cols = st.columns([1, 3, 1])
                 with cols[0]:
-                    st.image(entry_image_display(e), use_container_width=True)
+                    image_preview(entry_image_display(e), max_width=120)
                 with cols[1]:
                     st.markdown(f"**#{i+1}: {e['title']}**")
                     st.caption(f"{e['image_kind']}: {e['image_ref']}")
