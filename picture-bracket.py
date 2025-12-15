@@ -11,7 +11,7 @@ MAX_ENTRIES = 64
 HISTORY_FILE = Path("bracket_history.json")
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
-
+DRAFTS_FILE = Path("bracket_drafts.json")
 
 # ---------------- Persistence ----------------
 
@@ -27,6 +27,16 @@ def load_history():
 def save_history(history):
     HISTORY_FILE.write_text(json.dumps(history, indent=2), encoding="utf-8")
 
+def load_drafts():
+    if DRAFTS_FILE.exists():
+        try:
+            return json.loads(DRAFTS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+    return []
+
+def save_drafts(drafts):
+    DRAFTS_FILE.write_text(json.dumps(drafts, indent=2), encoding="utf-8")
 
 # ---------------- State ----------------
 
@@ -46,6 +56,7 @@ def ensure_state():
         "input_nonce": 0,
         "bracket_name": "",
         "bracket_name_set": False,
+        "drafts": load_drafts(),
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -321,6 +332,10 @@ def page_current_bracket():
 
     st.write(f"Current entries: **{len(st.session_state.entries)} / {MAX_ENTRIES}**")
 
+    if not st.session_state.bracket_started:
+        if st.button("Save draft"):
+            save_current_as_draft()
+
     # Entry list w/ thumbnail + remove buttons
     if st.session_state.entries:
         with st.expander("Entries (preview + remove)"):
@@ -395,12 +410,6 @@ def page_current_bracket():
         left = st.session_state.entries[a_idx]
         right = st.session_state.entries[b_idx]
 
-        vote_size = st.slider(
-            "Voting image size",
-            200, 600, 350, 25,
-            key="vote_image_size",
-        )
-
         st.session_state.current_match_context = {
             "round_num": round_num,
             "match_num": match_num,
@@ -410,6 +419,11 @@ def page_current_bracket():
         }
 
         st.subheader(f"Round {round_num} – Match {match_num} / {total_matches}")
+        vote_size = st.slider(
+            "Voting image size",
+            200, 600, 350, 25,
+            key="vote_image_size",
+        )
         colL, colR = st.columns([1, 1])
 
         with colL:
@@ -480,15 +494,84 @@ def page_history():
     else:
         st.info("No vote history stored for this bracket.")
 
+def save_current_as_draft():
+    if st.session_state.bracket_started:
+        st.warning("Can't save a draft after the bracket starts.")
+        return
+    if len(st.session_state.entries) < 2:
+        st.warning("Add at least 2 entries to save a draft.")
+        return
+
+    draft = {
+        "id": str(uuid4()),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "bracket_name": st.session_state.bracket_name or "Untitled draft",
+        "entries": st.session_state.entries,  # includes local file paths for uploads
+    }
+    st.session_state.drafts.append(draft)
+    save_drafts(st.session_state.drafts)
+    st.success(f"Saved draft: {draft['bracket_name']}")
+
+def load_draft_into_current(draft):
+    # Load bracket info into the current editor state (not started)
+    reset_everything()  # clears current entries + bracket name
+    st.session_state.bracket_name = draft.get("bracket_name", "")
+    st.session_state.entries = draft.get("entries", [])
+    st.session_state.input_nonce += 1  # ensure clean input widgets
+    st.rerun()
+
+def delete_draft(draft_id):
+    st.session_state.drafts = [d for d in st.session_state.drafts if d["id"] != draft_id]
+    save_drafts(st.session_state.drafts)
+    st.rerun()
+
+def page_drafts():
+    st.header("Drafts")
+
+    drafts = st.session_state.drafts
+    if not drafts:
+        st.info("No drafts yet. Build a bracket on the Current Bracket tab, then click 'Save draft'.")
+        return
+
+    drafts_sorted = sorted(drafts, key=lambda d: d.get("created_at", ""), reverse=True)
+
+    labels = [
+        f"{i+1}. {d.get('bracket_name','Untitled')} ({len(d.get('entries', []))} entries) — {d.get('created_at','')}"
+        for i, d in enumerate(drafts_sorted)
+    ]
+    idx = st.selectbox("Choose a draft", range(len(drafts_sorted)), format_func=lambda i: labels[i])
+    draft = drafts_sorted[idx]
+
+    st.subheader(draft.get("bracket_name", "Untitled"))
+    st.caption(f"Created: {draft.get('created_at','')} • Entries: {len(draft.get('entries', []))}")
+
+    with st.expander("Preview entries"):
+        for e in draft.get("entries", []):
+            cols = st.columns([1, 4])
+            with cols[0]:
+                image_preview(entry_image_display(e), max_width=120)
+            with cols[1]:
+                st.markdown(f"**{e.get('title','')}**")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Load this draft", key=f"load_{draft['id']}"):
+            load_draft_into_current(draft)
+    with c2:
+        if st.button("Delete this draft", key=f"del_{draft['id']}"):
+            delete_draft(draft["id"])
+
 
 def main():
     ensure_state()
     st.set_page_config(page_title="Picture Bracket", page_icon="🏆", layout="wide")
     st.title("🏆 Picture Bracket")
 
-    tab_current, tab_history = st.tabs(["Current Bracket", "Bracket History"])
+    tab_current, tab_drafts, tab_history = st.tabs(["Current Bracket", "Drafts", "Bracket History"])
     with tab_current:
         page_current_bracket()
+    with tab_drafts:
+        page_drafts()
     with tab_history:
         page_history()
 
