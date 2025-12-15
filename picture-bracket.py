@@ -435,7 +435,7 @@ def page_history():
         "image_kind": record["winner_image_kind"],
         "image_ref": record["winner_image_ref"],
     }
-    st.image(entry_image_display(winner_entry), caption=winner_entry["title"], use_container_width=True)
+    image_preview(entry_image_display(winner_entry), max_width=450)
     st.caption(f"Created at: {record['created_at']}")
 
     vote_log = record.get("vote_log", [])
