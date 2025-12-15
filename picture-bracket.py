@@ -44,6 +44,8 @@ def ensure_state():
         "vote_log": [],
         "current_match_context": None,
         "input_nonce": 0,
+        "bracket_name": "",
+        "bracket_name_set": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -60,10 +62,13 @@ def reset_bracket_only():
     st.session_state.winner_saved = False
     st.session_state.vote_log = []
     st.session_state.current_match_context = None
+    st.session_state.bracket_name_set = False
 
 
 def reset_everything():
     st.session_state.entries = []
+    st.session_state.bracket_name = ""
+    st.session_state.bracket_name_set = False
     reset_bracket_only()
 
 # ---------------- Image display helpers ----------------
@@ -81,6 +86,8 @@ def generate_bracket():
     n = len(entries)
     if n < 2:
         return
+    
+    st.session_state.bracket_name_set = True
 
     indices = list(range(n))
     random.shuffle(indices)
@@ -215,7 +222,8 @@ def save_current_bracket_to_history():
     winner = st.session_state.entries[winner_idx]
     record = {
         "id": str(uuid4()),
-        "created_at": datetime.utcnow().isoformat() + "Z",
+        "bracket_name": st.session_state.bracket_name,
+        "created_at": datetime.now(datetime.timezone.utc).isoformat() + "Z",
         "winner_title": winner["title"],
         "winner_image_kind": winner["image_kind"],
         "winner_image_ref": winner["image_ref"],
@@ -232,6 +240,18 @@ def save_current_bracket_to_history():
 
 def page_current_bracket():
     st.header("Create & Run Bracket")
+
+    st.subheader("Bracket details")
+
+    if not st.session_state.bracket_started:
+        bracket_name = st.text_input(
+            "Bracket name",
+            value=st.session_state.bracket_name,
+            placeholder="e.g. Best Dungeon Crawler Carl Character",
+        )
+        st.session_state.bracket_name = bracket_name.strip()
+    else:
+        st.markdown(f"**Bracket:** {st.session_state.bracket_name or 'Untitled bracket'}")
 
     st.subheader("Add entries")
 
@@ -349,6 +369,8 @@ def page_current_bracket():
 
         st.success("Tournament complete!")
         st.subheader("🏆 Winner")
+        if st.session_state.bracket_name:
+            st.markdown(f"### 🏷️ {st.session_state.bracket_name}")
         image_preview(entry_image_display(winner), max_width=450)
         st.write(f"**{winner['title']}** is the champion.")
 
@@ -417,7 +439,7 @@ def page_history():
     history_sorted = sorted(history, key=lambda r: r["created_at"], reverse=True)
 
     labels = [
-        f"{i+1}. {h['winner_title']} (created {h['created_at']})"
+        f"{i+1}. {h.get('bracket_name','Untitled')} — {h['winner_title']}"
         for i, h in enumerate(history_sorted)
     ]
     idx = st.selectbox(
@@ -428,6 +450,9 @@ def page_history():
     )
 
     record = history_sorted[idx]
+
+    if record.get("bracket_name"):
+        st.markdown(f"## 🏷️ {record['bracket_name']}")
 
     st.subheader("Winner")
     winner_entry = {
